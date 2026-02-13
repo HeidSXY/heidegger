@@ -213,6 +213,65 @@ pub fn so_arm101_chain() -> KinematicChain {
     ])
 }
 
+/// Create a KinematicChain for the SO-ARM100.
+/// Mechanically identical to SO-ARM101 (same 3D printed design, same STS3215 servos).
+/// Differences are in wiring and motor gear ratios, not link geometry.
+pub fn so_arm100_chain() -> KinematicChain {
+    so_arm101_chain() // Same mechanical structure
+}
+
+/// Create a KinematicChain for the Koch v1.1.
+/// Uses Dynamixel XL430 (base, shoulder) + XL330 (elbow, wrist, gripper) servos.
+/// Slightly different proportions from SO-ARM series:
+/// - Base mount taller (XL430 is 34mm tall vs STS3215 ~30mm)
+/// - Upper arm ~100mm, forearm ~100mm, wrist shorter
+/// - Based on Alexander Koch's 3D printed design and MuJoCo menagerie URDF.
+pub fn koch_v1_1_chain() -> KinematicChain {
+    KinematicChain::new(vec![
+        KinematicJoint {
+            name: "base_rotation".to_string(),
+            axis: JointAxis::Z,
+            origin_xyz: [0.0, 0.0, 0.025], // base plate + mount
+        },
+        KinematicJoint {
+            name: "shoulder".to_string(),
+            axis: JointAxis::Y,
+            origin_xyz: [0.0, 0.0, 0.034], // XL430 servo height
+        },
+        KinematicJoint {
+            name: "elbow".to_string(),
+            axis: JointAxis::Y,
+            origin_xyz: [0.0, 0.0, 0.100], // upper arm length
+        },
+        KinematicJoint {
+            name: "wrist_flex".to_string(),
+            axis: JointAxis::Y,
+            origin_xyz: [0.0, 0.0, 0.100], // forearm length
+        },
+        KinematicJoint {
+            name: "wrist_roll".to_string(),
+            axis: JointAxis::Z,
+            origin_xyz: [0.0, 0.0, 0.040], // wrist length (XL330)
+        },
+        KinematicJoint {
+            name: "gripper".to_string(),
+            axis: JointAxis::Y,
+            origin_xyz: [0.0, 0.0, 0.010], // gripper mount
+        },
+    ])
+}
+
+/// Get a kinematic chain by robot model name.
+/// Returns None if the model name is not recognized.
+pub fn chain_by_name(name: &str) -> Option<KinematicChain> {
+    match name {
+        "so_arm101" => Some(so_arm101_chain()),
+        "so_arm100" => Some(so_arm100_chain()),
+        "koch_v1_1" => Some(koch_v1_1_chain()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

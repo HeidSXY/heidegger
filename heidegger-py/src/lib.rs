@@ -9,26 +9,42 @@ use heidegger_core::collision::{self, CollisionChecker};
 #[pyclass]
 struct SafetyShim {
     inner: RustSafetyShim,
+    /// Operation mode: "guardian" (clamp + reject) or "shadow" (observe only)
+    mode: String,
 }
 
 #[pymethods]
 impl SafetyShim {
     /// Create a SafetyShim from a JSON config string.
+    ///
+    /// Args:
+    ///     config_json: JSON string with joint limits array.
+    ///     dt: Control loop period in seconds.
+    ///     mode: "guardian" (default, clamps actions) or "shadow" (observe only).
     #[new]
-    fn new(config_json: &str, dt: f64) -> PyResult<Self> {
+    #[pyo3(signature = (config_json, dt, mode = "guardian"))]
+    fn new(config_json: &str, dt: f64, mode: &str) -> PyResult<Self> {
         let inner = RustSafetyShim::from_json(config_json, dt)
             .map_err(|e| PyValueError::new_err(e))?;
-        Ok(SafetyShim { inner })
+        let mode = match mode {
+            "guardian" | "shadow" => mode.to_string(),
+            _ => return Err(PyValueError::new_err(
+                format!("Invalid mode '{}'. Use 'guardian' or 'shadow'.", mode)
+            )),
+        };
+        Ok(SafetyShim { inner, mode })
     }
 
     /// Create a SafetyShim with simple joint limits (no JSON needed).
     #[staticmethod]
+    #[pyo3(signature = (names, lowers, uppers, max_velocities, dt, mode = "guardian"))]
     fn from_limits(
         names: Vec<String>,
         lowers: Vec<f64>,
         uppers: Vec<f64>,
         max_velocities: Vec<f64>,
         dt: f64,
+        mode: &str,
     ) -> PyResult<Self> {
         if names.len() != lowers.len()
             || names.len() != uppers.len()
@@ -51,12 +67,24 @@ impl SafetyShim {
             })
             .collect();
 
+        let mode = match mode {
+            "guardian" | "shadow" => mode.to_string(),
+            _ => return Err(PyValueError::new_err(
+                format!("Invalid mode '{}'. Use 'guardian' or 'shadow'.", mode)
+            )),
+        };
+
         Ok(SafetyShim {
             inner: RustSafetyShim::new(joints, dt),
+            mode,
         })
     }
 
     /// Check a raw action for safety and return the clamped version.
+    ///
+    /// In "guardian" mode: returns the clamped safe action.
+    /// In "shadow" mode: returns the original action unchanged, but reports
+    /// what *would* have been clamped via the `would_clamp` field.
     fn check<'py>(
         &self,
         py: Python<'py>,
@@ -69,8 +97,22 @@ impl SafetyShim {
             .map_err(|e| PyValueError::new_err(e))?;
 
         let dict = PyDict::new(py);
-        dict.set_item("safe_action", &result.safe_action)?;
-        dict.set_item("was_clamped", result.was_clamped)?;
+
+        let is_shadow = self.mode == "shadow";
+
+        if is_shadow {
+            // Shadow mode: return original action, note what would have changed
+            dict.set_item("safe_action", &raw_action)?;
+            dict.set_item("was_clamped", false)?;
+            dict.set_item("would_clamp", result.was_clamped)?;
+        } else {
+            // Guardian mode: return clamped action
+            dict.set_item("safe_action", &result.safe_action)?;
+            dict.set_item("was_clamped", result.was_clamped)?;
+            dict.set_item("would_clamp", result.was_clamped)?;
+        }
+
+        dict.set_item("mode", &self.mode)?;
 
         let violations: Vec<Bound<'py, PyDict>> = result
             .details
@@ -102,6 +144,25 @@ impl SafetyShim {
     fn joint_names(&self) -> Vec<String> {
         self.inner.joints.iter().map(|j| j.name.clone()).collect()
     }
+
+    /// Get or set the operation mode.
+    #[getter]
+    fn mode(&self) -> &str {
+        &self.mode
+    }
+
+    #[setter]
+    fn set_mode(&mut self, mode: &str) -> PyResult<()> {
+        match mode {
+            "guardian" | "shadow" => {
+                self.mode = mode.to_string();
+                Ok(())
+            }
+            _ => Err(PyValueError::new_err(
+                format!("Invalid mode '{}'. Use 'guardian' or 'shadow'.", mode)
+            )),
+        }
+    }
 }
 
 /// Python-facing CollisionGuard — forward kinematics + self-collision detection.
@@ -109,17 +170,36 @@ impl SafetyShim {
 struct CollisionGuard {
     chain: KinematicChain,
     checker: CollisionChecker,
+    model_name: String,
 }
 
 #[pymethods]
 impl CollisionGuard {
-    /// Create a CollisionGuard for the SO-ARM101 with a given safety margin (meters).
+    /// Create a CollisionGuard for a given robot model.
+    ///
+    /// Args:
+    ///     safety_margin: Minimum distance between links (meters) before
+    ///                    a collision is reported.
+    ///     robot_model: Robot model name ("so_arm101", "so_arm100", "koch_v1_1").
+    ///                  Defaults to "so_arm101" for backwards compatibility.
     #[new]
-    fn new(safety_margin: f64) -> Self {
-        CollisionGuard {
-            chain: kinematics::so_arm101_chain(),
-            checker: collision::so_arm101_collision_checker(safety_margin),
-        }
+    #[pyo3(signature = (safety_margin, robot_model = "so_arm101"))]
+    fn new(safety_margin: f64, robot_model: &str) -> PyResult<Self> {
+        let chain = kinematics::chain_by_name(robot_model)
+            .ok_or_else(|| PyValueError::new_err(
+                format!("Unknown robot model '{}'. Available: so_arm101, so_arm100, koch_v1_1", robot_model)
+            ))?;
+
+        let checker = collision::collision_checker_by_name(robot_model, safety_margin)
+            .ok_or_else(|| PyValueError::new_err(
+                format!("No collision checker for '{}'. Available: so_arm101, so_arm100, koch_v1_1", robot_model)
+            ))?;
+
+        Ok(CollisionGuard {
+            chain,
+            checker,
+            model_name: robot_model.to_string(),
+        })
     }
 
     /// Compute forward kinematics: returns list of [x, y, z] positions
@@ -175,6 +255,12 @@ impl CollisionGuard {
             .iter()
             .map(|p| vec![p[0], p[1], p[2]])
             .collect()
+    }
+
+    /// Get the robot model name.
+    #[getter]
+    fn robot_model(&self) -> &str {
+        &self.model_name
     }
 }
 

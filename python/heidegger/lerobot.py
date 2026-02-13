@@ -75,12 +75,15 @@ class SafetyWrapper:
         dt: Control loop period in seconds (default: 0.02 = 50Hz).
         safety_margin: Collision detection margin in meters (default: 0.015).
         collision_check: Whether to run self-collision detection (default: True).
-                         Set to False if FK is not available for your robot.
+        mode: "guardian" (default, clamps actions) or "shadow" (observe only,
+              useful during training to avoid polluting demonstrations).
         verbose: Print safety interventions to console (default: False).
 
     Example:
         >>> safe_policy = SafetyWrapper(policy, robot_model="so_arm101")
         >>> action = safe_policy.select_action(observation)
+        >>> # Shadow mode (training): observe without interfering
+        >>> safe_policy = SafetyWrapper(policy, mode="shadow")
     """
 
     def __init__(
@@ -90,24 +93,26 @@ class SafetyWrapper:
         dt: float = 0.02,
         safety_margin: float = 0.015,
         collision_check: bool = True,
+        mode: str = "guardian",
         verbose: bool = False,
     ):
         self.policy = policy
         self.verbose = verbose
         self.collision_check = collision_check
+        self._mode = mode
 
-        # Load safety shim
+        # Load safety shim with mode
         config_json = _load_config(robot_model)
-        self.shim = SafetyShim(config_json, dt)
+        self.shim = SafetyShim(config_json, dt, mode)
 
-        # Load collision guard (only for robots with FK support)
+        # Load collision guard — all built-in models now fully supported
         self.guard = None
         if collision_check:
-            if robot_model == "so_arm101":
-                self.guard = CollisionGuard(safety_margin)
-            else:
+            try:
+                self.guard = CollisionGuard(safety_margin, robot_model)
+            except Exception:
                 warnings.warn(
-                    f"Self-collision detection not yet available for '{robot_model}'. "
+                    f"Self-collision detection not available for '{robot_model}'. "
                     f"Only position/velocity clamping will be applied. "
                     f"Set collision_check=False to suppress this warning.",
                     stacklevel=2,

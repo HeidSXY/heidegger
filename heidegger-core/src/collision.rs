@@ -320,6 +320,82 @@ pub fn so_arm101_collision_checker(safety_margin: f64) -> CollisionChecker {
     )
 }
 
+/// Create a CollisionChecker for the SO-ARM100.
+/// Mechanically identical to SO-ARM101 — same capsule geometry.
+pub fn so_arm100_collision_checker(safety_margin: f64) -> CollisionChecker {
+    so_arm101_collision_checker(safety_margin)
+}
+
+/// Create a CollisionChecker for the Koch v1.1.
+/// Uses Dynamixel XL430 (base/shoulder) + XL330 (elbow/wrist/gripper).
+/// Capsule dimensions based on the 3D printed part geometry.
+pub fn koch_v1_1_collision_checker(safety_margin: f64) -> CollisionChecker {
+    CollisionChecker::new(
+        vec![
+            // Base plate (link 0)
+            LinkCapsule {
+                link_index: 0,
+                name: "base_plate".to_string(),
+                start_local: [0.0, 0.0, 0.0],
+                end_local: [0.0, 0.0, 0.025],
+                radius: 0.035,
+            },
+            // Base rotation body (link 1)
+            LinkCapsule {
+                link_index: 1,
+                name: "base_body".to_string(),
+                start_local: [0.0, 0.0, 0.0],
+                end_local: [0.0, 0.0, 0.034],
+                radius: 0.025,
+            },
+            // Upper arm (link 2)
+            LinkCapsule {
+                link_index: 2,
+                name: "upper_arm".to_string(),
+                start_local: [0.0, 0.0, 0.0],
+                end_local: [0.0, 0.0, 0.100],
+                radius: 0.016,
+            },
+            // Forearm (link 3)
+            LinkCapsule {
+                link_index: 3,
+                name: "forearm".to_string(),
+                start_local: [0.0, 0.0, 0.0],
+                end_local: [0.0, 0.0, 0.100],
+                radius: 0.013,
+            },
+            // Wrist (link 4)
+            LinkCapsule {
+                link_index: 4,
+                name: "wrist".to_string(),
+                start_local: [0.0, 0.0, 0.0],
+                end_local: [0.0, 0.0, 0.040],
+                radius: 0.010,
+            },
+            // Gripper (link 6)
+            LinkCapsule {
+                link_index: 6,
+                name: "gripper".to_string(),
+                start_local: [0.0, 0.0, 0.0],
+                end_local: [0.0, 0.0, 0.045],
+                radius: 0.013,
+            },
+        ],
+        safety_margin,
+    )
+}
+
+/// Get a collision checker by robot model name.
+/// Returns None if the model name is not recognized.
+pub fn collision_checker_by_name(name: &str, safety_margin: f64) -> Option<CollisionChecker> {
+    match name {
+        "so_arm101" => Some(so_arm101_collision_checker(safety_margin)),
+        "so_arm100" => Some(so_arm100_collision_checker(safety_margin)),
+        "koch_v1_1" => Some(koch_v1_1_collision_checker(safety_margin)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
