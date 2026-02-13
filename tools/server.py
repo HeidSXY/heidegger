@@ -165,18 +165,20 @@ class SimPair:
         """Run one step: apply raw angles to ghost, filtered to safe."""
         t0 = time.perf_counter_ns()
 
+        TABLE_Z = 0.012  # table surface height (m)
+
         # 1. Apply raw to ghost
         self.data_ghost.ctrl[:6] = raw_angles
         for _ in range(5):
             mujoco.mj_step(self.model_ghost, self.data_ghost)
 
-        # 2. Heidegger filter
+        # 2. Heidegger filter — Layer 1 & 2: position clamping + velocity limiting
         result = self.shim.check(raw_angles, self.current_safe_pos.tolist())
         clamped = np.array(result["safe_action"])
         was_clamped = result["was_clamped"]
         violations = result["violations"]
 
-        # Collision check
+        # Layer 3: Self-collision check
         has_collision = self.guard.has_collision(clamped.tolist())
         collision_details = []
         if has_collision:
@@ -185,6 +187,21 @@ class SimPair:
                 {"a": c["link_a"], "b": c["link_b"], "dist": round(c["distance"] * 1000, 1)}
                 for c in cols[:3]
             ]
+
+        # Layer 4: Workspace boundary check (FK z-height)
+        # Skip frames 0-1 (base origin + base_link, fixed to table)
+        boundary_violation = False
+        boundary_min_z = 999.0
+        if not has_collision:
+            fk_positions = self.guard.forward_kinematics(clamped.tolist())
+            movable_z = [p[2] for p in fk_positions[2:]]  # skip base frames
+            min_z = min(movable_z) if movable_z else 999.0
+            boundary_min_z = round(min_z * 1000, 1)  # mm
+            if min_z < TABLE_Z:
+                boundary_violation = True
+
+        # Determine safe output
+        if has_collision or boundary_violation:
             safe_angles = self.current_safe_pos.copy()
         else:
             safe_angles = clamped.copy()
@@ -220,6 +237,8 @@ class SimPair:
             "was_clamped": was_clamped,
             "has_collision": has_collision,
             "collisions": collision_details,
+            "boundary_violation": boundary_violation,
+            "boundary_min_z": boundary_min_z,
             "violations": violations,
             "safe_angles": safe_angles.tolist(),
             "safety_us": round(safety_us, 1),

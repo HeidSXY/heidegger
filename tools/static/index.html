@@ -1,520 +1,597 @@
 <!DOCTYPE html>
 <html lang="zh">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Heidegger — Interactive Safety Simulator</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  
-  :root {
-    --bg: #0a0c10;
-    --surface: #12151c;
-    --surface2: #1a1e28;
-    --border: #2a2e3a;
-    --text: #e4e8f0;
-    --text-dim: #8890a0;
-    --red: #e84040;
-    --red-bg: rgba(232, 64, 64, 0.08);
-    --red-border: rgba(232, 64, 64, 0.3);
-    --green: #34d058;
-    --green-bg: rgba(52, 208, 88, 0.08);
-    --green-border: rgba(52, 208, 88, 0.3);
-    --orange: #f0883e;
-    --blue: #58a6ff;
-    --mono: 'JetBrains Mono', monospace;
-    --sans: 'Inter', -apple-system, sans-serif;
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Heidegger — Interactive Safety Simulator</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
+    :root {
+      --bg: #0a0c10;
+      --surface: #12151c;
+      --surface2: #181c26;
+      --surface3: #1e2230;
+      --border: #282d3a;
+      --text: #e4e8f0;
+      --text-dim: #7a8299;
+      --red: #e84040;
+      --red-glow: rgba(232, 64, 64, 0.12);
+      --green: #34d058;
+      --green-glow: rgba(52, 208, 88, 0.12);
+      --orange: #f0883e;
+      --orange-glow: rgba(240, 136, 62, 0.10);
+      --blue: #58a6ff;
+      --blue-dim: rgba(88, 166, 255, 0.15);
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Inter', -apple-system, sans-serif;
+    }
 
-  /* ── Header ── */
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  .header h1 {
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-  }
-  .header h1 span { color: var(--blue); }
-  .header .status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-  .header .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--green);
-    animation: pulse 2s infinite;
-  }
-  .header .dot.disconnected { background: var(--red); animation: none; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+    }
 
-  /* ── Main Layout ── */
-  .main {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto 1fr;
-    gap: 0;
-    height: calc(100vh - 49px);
-  }
+    /* ━━━ Layout: header + main ━━━ */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
 
-  /* ── Viewports ── */
-  .viewport {
-    position: relative;
-    background: #000;
-    border: 1px solid var(--border);
-    overflow: hidden;
-  }
-  .viewport.left { border-right: none; }
-  .viewport img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: block;
-  }
-  .viewport .label {
-    position: absolute;
-    top: 10px;
-    left: 12px;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 600;
-    padding: 4px 10px;
-    border-radius: 4px;
-    letter-spacing: 0.5px;
-  }
-  .viewport.left .label {
-    background: var(--red-bg);
-    border: 1px solid var(--red-border);
-    color: var(--red);
-  }
-  .viewport.right .label {
-    background: var(--green-bg);
-    border: 1px solid var(--green-border);
-    color: var(--green);
-  }
+    /* ━━━ Header ━━━ */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 42px;
+      min-height: 42px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
 
-  /* ── Controls ── */
-  .controls-area {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: 1fr 320px;
-    border-top: 1px solid var(--border);
-    background: var(--surface);
-    max-height: 340px;
-    overflow-y: auto;
-  }
+    .header h1 {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
 
-  .sliders-panel {
-    padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .sliders-panel h3 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-  }
+    .header h1 span {
+      color: var(--blue);
+    }
 
-  .slider-row {
-    display: grid;
-    grid-template-columns: 110px 1fr 55px 55px;
-    align-items: center;
-    gap: 10px;
-    height: 30px;
-  }
-  .slider-row label {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-  .slider-row input[type="range"] {
-    -webkit-appearance: none;
-    width: 100%;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--surface2);
-    outline: none;
-    cursor: pointer;
-  }
-  .slider-row input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px; height: 14px;
-    border-radius: 50%;
-    background: var(--blue);
-    cursor: grab;
-    border: 2px solid var(--bg);
-  }
-  .slider-row input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; }
-  .slider-row .val {
-    font-family: var(--mono);
-    font-size: 11px;
-    text-align: right;
-  }
-  .slider-row .val.raw { color: var(--text-dim); }
-  .slider-row .val.safe { color: var(--green); font-weight: 600; }
-  .slider-row .val.clamped { color: var(--orange); font-weight: 600; }
+    .header .conn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+    }
 
-  /* ── Right Sidebar ── */
-  .sidebar {
-    border-left: 1px solid var(--border);
-    padding: 14px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    overflow-y: auto;
-  }
-  .sidebar h3 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--text-dim);
-  }
+    .header .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
 
-  /* Status */
-  .status-box {
-    padding: 10px 12px;
-    border-radius: 6px;
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.6;
-  }
-  .status-box.ok {
-    background: var(--green-bg);
-    border: 1px solid var(--green-border);
-    color: var(--green);
-  }
-  .status-box.danger {
-    background: var(--red-bg);
-    border: 1px solid var(--red-border);
-    color: var(--red);
-  }
-  .status-box.warning {
-    background: rgba(240, 136, 62, 0.08);
-    border: 1px solid rgba(240, 136, 62, 0.3);
-    color: var(--orange);
-  }
+    .header .dot.off {
+      background: var(--red);
+      animation: none;
+    }
 
-  /* Presets */
-  .presets {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .preset-btn {
-    font-family: var(--mono);
-    font-size: 11px;
-    padding: 7px 10px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface2);
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.15s;
-  }
-  .preset-btn:hover { border-color: var(--blue); color: var(--blue); }
-  .preset-btn.danger { border-color: var(--red-border); }
-  .preset-btn.danger:hover { border-color: var(--red); color: var(--red); }
+    @keyframes pulse {
 
-  /* Noise toggle */
-  .noise-row {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 12px;
-  }
-  .noise-row input[type="checkbox"] {
-    width: 16px; height: 16px;
-    accent-color: var(--orange);
-  }
+      0%,
+      100% {
+        opacity: 1;
+      }
 
-  /* Perf */
-  .perf {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--text-dim);
-    text-align: right;
-    padding-top: 4px;
-    border-top: 1px solid var(--border);
-  }
-</style>
+      50% {
+        opacity: 0.4;
+      }
+    }
+
+    /* ━━━ Main: sidebar + viewports ━━━ */
+    .main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 0;
+    }
+
+    /* ━━━ Sidebar ━━━ */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 12px 14px;
+      gap: 14px;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    /* Sliders */
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .slider-item {
+      display: grid;
+      grid-template-columns: 1fr 42px 42px;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .slider-item .top-row {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .slider-item label {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .slider-item .vals {
+      font-family: var(--mono);
+      font-size: 10px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .slider-item .vals .raw {
+      color: var(--text-dim);
+    }
+
+    .slider-item .vals .safe {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    .slider-item .vals .clamped {
+      color: var(--orange);
+      font-weight: 600;
+    }
+
+    .slider-item input[type="range"] {
+      grid-column: 1 / -1;
+      -webkit-appearance: none;
+      width: 100%;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--surface3);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .slider-item input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--blue);
+      cursor: grab;
+      border: 2px solid var(--bg);
+      box-shadow: 0 0 6px var(--blue-dim);
+    }
+
+    .slider-item input[type="range"]:active::-webkit-slider-thumb {
+      cursor: grabbing;
+    }
+
+    /* Status */
+    .status-box {
+      padding: 8px 10px;
+      border-radius: 5px;
+      font-family: var(--mono);
+      font-size: 10px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .status-box.ok {
+      background: var(--green-glow);
+      border: 1px solid rgba(52, 208, 88, 0.25);
+      color: var(--green);
+    }
+
+    .status-box.danger {
+      background: var(--red-glow);
+      border: 1px solid rgba(232, 64, 64, 0.25);
+      color: var(--red);
+    }
+
+    .status-box.warning {
+      background: var(--orange-glow);
+      border: 1px solid rgba(240, 136, 62, 0.25);
+      color: var(--orange);
+    }
+
+    /* Presets */
+    .presets {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .preset-btn {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.12s;
+    }
+
+    .preset-btn:hover {
+      border-color: var(--blue);
+      color: var(--blue);
+    }
+
+    .preset-btn.danger {
+      border-color: rgba(232, 64, 64, 0.2);
+    }
+
+    .preset-btn.danger:hover {
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    /* Noise toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-family: var(--mono);
+    }
+
+    .toggle-row input {
+      accent-color: var(--orange);
+    }
+
+    /* Perf */
+    .perf {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+      text-align: right;
+      padding-top: 4px;
+      border-top: 1px solid var(--border);
+      margin-top: auto;
+    }
+
+    /* ━━━ Viewports ━━━ */
+    .viewports {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+      padding: 2px;
+      background: var(--bg);
+      min-height: 0;
+    }
+
+    .viewport {
+      position: relative;
+      background: #000;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .viewport img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .viewport .tag {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 3px;
+      letter-spacing: 0.5px;
+      pointer-events: none;
+    }
+
+    .viewport.raw .tag {
+      background: var(--red-glow);
+      border: 1px solid rgba(232, 64, 64, 0.3);
+      color: var(--red);
+    }
+
+    .viewport.safe .tag {
+      background: var(--green-glow);
+      border: 1px solid rgba(52, 208, 88, 0.3);
+      color: var(--green);
+    }
+
+    /* Layer indicator overlay */
+    .viewport.safe .layers {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+    }
+
+    .viewport.safe .layers .pill {
+      font-family: var(--mono);
+      font-size: 8px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: rgba(0, 0, 0, 0.6);
+      color: var(--green);
+      border: 1px solid rgba(52, 208, 88, 0.2);
+    }
+
+    .viewport.safe .layers .pill.active {
+      background: var(--green-glow);
+    }
+  </style>
 </head>
+
 <body>
 
-<div class="header">
-  <h1><span>HEIDEGGER</span> Interactive Safety Simulator</h1>
-  <div class="status">
-    <div class="dot" id="connDot"></div>
-    <span id="connText">Connecting...</span>
-  </div>
-</div>
-
-<div class="main">
-  <!-- Left viewport: Raw / Ghost -->
-  <div class="viewport left">
-    <img id="imgGhost" alt="Raw simulation">
-    <div class="label">🔴 RAW — No Protection</div>
-  </div>
-
-  <!-- Right viewport: Safe / Heidegger -->
-  <div class="viewport right">
-    <img id="imgSafe" alt="Safe simulation">
-    <div class="label">🟢 HEIDEGGER — Protected</div>
-  </div>
-
-  <!-- Controls -->
-  <div class="controls-area">
-    <div class="sliders-panel">
-      <h3>Joint Control</h3>
-      <div class="slider-row">
-        <label>base_rotation</label>
-        <input type="range" id="s0" min="-3.14" max="3.14" step="0.01" value="0">
-        <span class="val raw" id="v0">0.00</span>
-        <span class="val safe" id="vs0">0.00</span>
-      </div>
-      <div class="slider-row">
-        <label>shoulder</label>
-        <input type="range" id="s1" min="-2.5" max="2.5" step="0.01" value="0">
-        <span class="val raw" id="v1">0.00</span>
-        <span class="val safe" id="vs1">0.00</span>
-      </div>
-      <div class="slider-row">
-        <label>elbow</label>
-        <input type="range" id="s2" min="-3.0" max="2.0" step="0.01" value="0">
-        <span class="val raw" id="v2">0.00</span>
-        <span class="val safe" id="vs2">0.00</span>
-      </div>
-      <div class="slider-row">
-        <label>wrist_flex</label>
-        <input type="range" id="s3" min="-2.5" max="2.5" step="0.01" value="0">
-        <span class="val raw" id="v3">0.00</span>
-        <span class="val safe" id="vs3">0.00</span>
-      </div>
-      <div class="slider-row">
-        <label>wrist_roll</label>
-        <input type="range" id="s4" min="-3.14" max="3.14" step="0.01" value="0">
-        <span class="val raw" id="v4">0.00</span>
-        <span class="val safe" id="vs4">0.00</span>
-      </div>
-      <div class="slider-row">
-        <label>gripper</label>
-        <input type="range" id="s5" min="-1.5" max="1.5" step="0.01" value="0">
-        <span class="val raw" id="v5">0.00</span>
-        <span class="val safe" id="vs5">0.00</span>
+  <div class="app">
+    <div class="header">
+      <h1><span>HEIDEGGER</span> Interactive Safety Simulator</h1>
+      <div class="conn">
+        <div class="dot" id="dot"></div>
+        <span id="connLabel">Connecting...</span>
       </div>
     </div>
 
-    <div class="sidebar">
-      <div>
-        <h3>Safety Status</h3>
-        <div class="status-box ok" id="statusBox">
-          ✅ All clear — no violations
+    <div class="main">
+      <!-- ── Sidebar ── -->
+      <div class="sidebar">
+        <div>
+          <div class="section-title">Joint Control</div>
+          <div class="slider-group" id="sliderGroup"></div>
         </div>
+
+        <div>
+          <div class="section-title">Safety Status</div>
+          <div class="status-box ok" id="statusBox">✅ All clear</div>
+        </div>
+
+        <div>
+          <div class="section-title">Presets</div>
+          <div class="presets">
+            <button class="preset-btn" onclick="P('home')">🏠 Home</button>
+            <button class="preset-btn" onclick="P('reach')">✋ Normal Reach</button>
+            <button class="preset-btn danger" onclick="P('table')">⚠️ 穿桌 Arm→Table</button>
+            <button class="preset-btn danger" onclick="P('reverse')">⚠️ 反关节 Reverse Elbow</button>
+            <button class="preset-btn danger" onclick="P('selfhit')">⚠️ 自碰撞 Self-Collision</button>
+            <button class="preset-btn danger" onclick="P('spin')">⚠️ 猛转 Extreme Spin</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="toggle-row">
+            <input type="checkbox" id="noise">
+            <label for="noise">VLA Noise Injection</label>
+          </div>
+        </div>
+
+        <div class="perf" id="perf">—</div>
       </div>
 
-      <div>
-        <h3>Preset Scenarios</h3>
-        <div class="presets">
-          <button class="preset-btn" onclick="applyPreset('home')">🏠 Home Position</button>
-          <button class="preset-btn" onclick="applyPreset('reach')">✋ Normal Reach</button>
-          <button class="preset-btn danger" onclick="applyPreset('table')">⚠️ 穿桌: Arm Into Table</button>
-          <button class="preset-btn danger" onclick="applyPreset('reverse')">⚠️ 反关节: Reverse Elbow</button>
-          <button class="preset-btn danger" onclick="applyPreset('selfhit')">⚠️ 自碰撞: Gripper Into Base</button>
-          <button class="preset-btn danger" onclick="applyPreset('spin')">⚠️ 猛转: Extreme Rotation</button>
+      <!-- ── Viewports ── -->
+      <div class="viewports">
+        <div class="viewport raw">
+          <img id="imgG" alt="raw">
+          <div class="tag">🔴 RAW — No Protection</div>
+        </div>
+        <div class="viewport safe">
+          <img id="imgS" alt="safe">
+          <div class="tag">🟢 HEIDEGGER — 4-Layer</div>
+          <div class="layers">
+            <span class="pill" id="pClamp">CLAMP</span>
+            <span class="pill" id="pVel">VEL</span>
+            <span class="pill" id="pCol">COL</span>
+            <span class="pill" id="pBnd">BND</span>
+          </div>
         </div>
       </div>
-
-      <div>
-        <div class="noise-row">
-          <input type="checkbox" id="noiseToggle">
-          <label for="noiseToggle">Auto VLA Noise Injection</label>
-        </div>
-      </div>
-
-      <div class="perf" id="perf">—</div>
     </div>
   </div>
-</div>
 
-<script>
-const JOINTS = ['base_rotation','shoulder','elbow','wrist_flex','wrist_roll','gripper'];
-const PRESETS = {
-  home:    [0, 0, 0, 0, 0, 0],
-  reach:   [0.3, 0.6, -1.2, 0.3, 0, 0.5],
-  table:   [0.3, 1.8, -0.3, 0.5, 0, 0.3],
-  reverse: [0, 0.5, 1.8, -0.5, 0, 0.3],
-  selfhit: [0, 1.0, -2.3, -1.5, 0, 0.3],
-  spin:    [5.0, 0.8, -0.5, 0, 3.0, 0.5],
-};
+  <script>
+    const JOINTS = [
+      { name: 'base_rotation', min: -3.14, max: 3.14 },
+      { name: 'shoulder', min: -2.5, max: 2.5 },
+      { name: 'elbow', min: -3.0, max: 2.0 },
+      { name: 'wrist_flex', min: -2.5, max: 2.5 },
+      { name: 'wrist_roll', min: -3.14, max: 3.14 },
+      { name: 'gripper', min: -1.5, max: 1.5 },
+    ];
+    const PRESETS = {
+      home: [0, 0, 0, 0, 0, 0],
+      reach: [0.3, 0.6, -1.2, 0.3, 0, 0.5],
+      table: [0.3, 1.8, -0.3, 0.5, 0, 0.3],
+      reverse: [0, 0.5, 1.8, -0.5, 0, 0.3],
+      selfhit: [0, 1.0, -2.3, -1.5, 0, 0.3],
+      spin: [5.0, 0.8, -0.5, 0, 3.0, 0.5],
+    };
 
-let ws = null;
-let sending = false;
-let pendingAngles = null;
-let noiseInterval = null;
+    // Build sliders dynamically
+    const group = document.getElementById('sliderGroup');
+    JOINTS.forEach((j, i) => {
+      const item = document.createElement('div');
+      item.className = 'slider-item';
+      item.innerHTML = `
+    <div class="top-row">
+      <label>${j.name}</label>
+      <div class="vals">
+        <span class="raw" id="vr${i}">0.00</span>
+        <span class="safe" id="vs${i}">0.00</span>
+      </div>
+    </div>
+    <input type="range" id="s${i}" min="${j.min}" max="${j.max}" step="0.01" value="0">
+  `;
+      group.appendChild(item);
+      item.querySelector('input').addEventListener('input', () => {
+        document.getElementById('vr' + i).textContent = parseFloat(document.getElementById('s' + i).value).toFixed(2);
+        send();
+      });
+    });
 
-function connect() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws`);
-  
-  ws.onopen = () => {
-    document.getElementById('connDot').classList.remove('disconnected');
-    document.getElementById('connText').textContent = 'Connected';
-    sendAngles();
-  };
+    let ws, sending = false, pending = null, noiseIv = null;
 
-  ws.onmessage = (evt) => {
-    const data = JSON.parse(evt.data);
-    
-    // Update images
-    document.getElementById('imgGhost').src = 'data:image/jpeg;base64,' + data.ghost;
-    document.getElementById('imgSafe').src = 'data:image/jpeg;base64,' + data.safe;
+    function connect() {
+      const p = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${p}//${location.host}/ws`);
+      ws.onopen = () => {
+        document.getElementById('dot').classList.remove('off');
+        document.getElementById('connLabel').textContent = 'Connected';
+        send();
+      };
+      ws.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        document.getElementById('imgG').src = 'data:image/jpeg;base64,' + d.ghost;
+        document.getElementById('imgS').src = 'data:image/jpeg;base64,' + d.safe;
 
-    // Update safe angle displays
-    if (data.safe_angles) {
-      for (let i = 0; i < 6; i++) {
-        const el = document.getElementById('vs' + i);
-        const raw = parseFloat(document.getElementById('s' + i).value);
-        const safe = data.safe_angles[i];
-        el.textContent = safe.toFixed(2);
-        
-        if (Math.abs(raw - safe) > 0.02) {
-          el.className = 'val clamped';
-        } else {
-          el.className = 'val safe';
+        // Safe angle display
+        if (d.safe_angles) {
+          for (let i = 0; i < 6; i++) {
+            const el = document.getElementById('vs' + i);
+            const raw = parseFloat(document.getElementById('s' + i).value);
+            const safe = d.safe_angles[i];
+            el.textContent = safe.toFixed(2);
+            el.className = Math.abs(raw - safe) > 0.02 ? 'clamped' : 'safe';
+          }
         }
-      }
+
+        // Status
+        const box = document.getElementById('statusBox');
+        let lines = [];
+        if (d.has_collision) {
+          d.collisions.forEach(c => lines.push(`💥 ${c.a} ↔ ${c.b}: ${c.dist}mm`));
+        }
+        if (d.boundary_violation) {
+          lines.push(`🚧 Workspace boundary: z_min=${d.boundary_min_z}mm < 12mm`);
+        }
+        if (d.violations && d.violations.length) {
+          d.violations.forEach(v => lines.push(`🔒 ${v.joint}: ${v.original.toFixed(2)}→${v.clamped.toFixed(2)}`));
+        }
+        if (d.has_collision || d.boundary_violation) {
+          box.className = 'status-box danger';
+          box.innerHTML = lines.join('<br>');
+        } else if (d.was_clamped) {
+          box.className = 'status-box warning';
+          box.innerHTML = lines.length ? lines.join('<br>') : '⚠️ Clamped';
+        } else {
+          box.className = 'status-box ok';
+          box.innerHTML = '✅ All clear';
+        }
+
+        // Layer pills
+        const pc = document.getElementById('pClamp');
+        const pv = document.getElementById('pVel');
+        const pcol = document.getElementById('pCol');
+        const pb = document.getElementById('pBnd');
+        pc.className = 'pill' + (d.was_clamped ? ' active' : '');
+        pv.className = 'pill' + (d.violations && d.violations.some(v => v.reason && v.reason.includes('Velocity')) ? ' active' : '');
+        pcol.className = 'pill' + (d.has_collision ? ' active' : '');
+        pb.className = 'pill' + (d.boundary_violation ? ' active' : '');
+
+        document.getElementById('perf').textContent = `${d.safety_us}μs`;
+        sending = false;
+        if (pending) { const a = pending; pending = null; sendRaw(a); }
+      };
+      ws.onclose = () => {
+        document.getElementById('dot').classList.add('off');
+        document.getElementById('connLabel').textContent = 'Reconnecting...';
+        setTimeout(connect, 2000);
+      };
     }
 
-    // Update status
-    const box = document.getElementById('statusBox');
-    let lines = [];
-    
-    if (data.has_collision) {
-      data.collisions.forEach(c => {
-        lines.push(`💥 ${c.a} ↔ ${c.b}: ${c.dist}mm`);
-      });
+    function sendRaw(a) {
+      if (!ws || ws.readyState !== 1) return;
+      if (sending) { pending = a; return; }
+      sending = true;
+      ws.send(JSON.stringify({ type: 'angles', angles: a }));
     }
-    if (data.violations && data.violations.length > 0) {
-      data.violations.forEach(v => {
-        lines.push(`🔒 ${v.joint}: ${v.original.toFixed(2)} → ${v.clamped.toFixed(2)} (${v.reason})`);
-      });
-    }
+    function getA() { return Array.from({ length: 6 }, (_, i) => parseFloat(document.getElementById('s' + i).value)); }
+    function send() { sendRaw(getA()); }
 
-    if (data.has_collision) {
-      box.className = 'status-box danger';
-      box.innerHTML = lines.join('<br>');
-    } else if (data.was_clamped) {
-      box.className = 'status-box warning';
-      box.innerHTML = lines.join('<br>');
-    } else {
-      box.className = 'status-box ok';
-      box.innerHTML = '✅ All clear — no violations';
-    }
-
-    // Perf
-    document.getElementById('perf').textContent = `Safety: ${data.safety_us}μs`;
-
-    // Send next if pending
-    sending = false;
-    if (pendingAngles) {
-      const a = pendingAngles;
-      pendingAngles = null;
-      sendRaw(a);
-    }
-  };
-
-  ws.onclose = () => {
-    document.getElementById('connDot').classList.add('disconnected');
-    document.getElementById('connText').textContent = 'Disconnected — retrying...';
-    setTimeout(connect, 2000);
-  };
-}
-
-function sendRaw(angles) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (sending) {
-    pendingAngles = angles;
-    return;
-  }
-  sending = true;
-  ws.send(JSON.stringify({ type: 'angles', angles }));
-}
-
-function getAngles() {
-  return Array.from({length: 6}, (_, i) => parseFloat(document.getElementById('s'+i).value));
-}
-
-function sendAngles() {
-  const angles = getAngles();
-  sendRaw(angles);
-}
-
-// Slider events
-for (let i = 0; i < 6; i++) {
-  const slider = document.getElementById('s' + i);
-  slider.addEventListener('input', () => {
-    document.getElementById('v' + i).textContent = parseFloat(slider.value).toFixed(2);
-    sendAngles();
-  });
-}
-
-// Presets
-function applyPreset(name) {
-  const vals = PRESETS[name];
-  if (!vals) return;
-  for (let i = 0; i < 6; i++) {
-    const slider = document.getElementById('s' + i);
-    slider.value = vals[i];
-    document.getElementById('v' + i).textContent = vals[i].toFixed(2);
-  }
-  sendAngles();
-}
-
-// Noise injection
-document.getElementById('noiseToggle').addEventListener('change', (e) => {
-  if (e.target.checked) {
-    noiseInterval = setInterval(() => {
-      const angles = getAngles();
-      const noisy = angles.map(a => a + (Math.random() - 0.5) * 0.6);
-      // Occasional big spike
-      if (Math.random() < 0.15) {
-        const j = Math.floor(Math.random() * 6);
-        noisy[j] += (Math.random() - 0.5) * 4.0;
-      }
+    window.P = function (name) {
+      const v = PRESETS[name]; if (!v) return;
       for (let i = 0; i < 6; i++) {
-        document.getElementById('s' + i).value = noisy[i];
-        document.getElementById('v' + i).textContent = noisy[i].toFixed(2);
+        document.getElementById('s' + i).value = v[i];
+        document.getElementById('vr' + i).textContent = v[i].toFixed(2);
       }
-      sendRaw(noisy);
-    }, 80);
-  } else {
-    if (noiseInterval) clearInterval(noiseInterval);
-    noiseInterval = null;
-  }
-});
+      send();
+    };
 
-// Start
-connect();
-</script>
+    document.getElementById('noise').addEventListener('change', e => {
+      if (e.target.checked) {
+        noiseIv = setInterval(() => {
+          const a = getA().map(v => v + (Math.random() - 0.5) * 0.6);
+          if (Math.random() < 0.15) { const j = Math.floor(Math.random() * 6); a[j] += (Math.random() - 0.5) * 4; }
+          for (let i = 0; i < 6; i++) {
+            document.getElementById('s' + i).value = a[i];
+            document.getElementById('vr' + i).textContent = a[i].toFixed(2);
+          }
+          sendRaw(a);
+        }, 80);
+      } else { clearInterval(noiseIv); noiseIv = null; }
+    });
+
+    connect();
+  </script>
 </body>
+
 </html>
