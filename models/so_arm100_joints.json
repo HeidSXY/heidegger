@@ -1,0 +1,50 @@
+[
+    {
+        "name": "base_rotation",
+        "lower": -3.14,
+        "upper": 3.14,
+        "max_velocity": 4.0,
+        "max_effort": 3.0,
+        "_comment": "Base yaw, SO-ARM100 uses STS3215 servos"
+    },
+    {
+        "name": "shoulder",
+        "lower": -1.57,
+        "upper": 1.57,
+        "max_velocity": 3.0,
+        "max_effort": 3.0,
+        "_comment": "Shoulder pitch, ±90°"
+    },
+    {
+        "name": "elbow",
+        "lower": -2.36,
+        "upper": 0.0,
+        "max_velocity": 4.0,
+        "max_effort": 3.0,
+        "_comment": "Elbow pitch, folds inward"
+    },
+    {
+        "name": "wrist_flex",
+        "lower": -1.57,
+        "upper": 1.57,
+        "max_velocity": 5.0,
+        "max_effort": 2.0,
+        "_comment": "Wrist pitch, ±90°"
+    },
+    {
+        "name": "wrist_roll",
+        "lower": -3.14,
+        "upper": 3.14,
+        "max_velocity": 5.0,
+        "max_effort": 2.0,
+        "_comment": "Wrist roll, full rotation"
+    },
+    {
+        "name": "gripper",
+        "lower": 0.0,
+        "upper": 1.05,
+        "max_velocity": 6.0,
+        "max_effort": 1.0,
+        "_comment": "Gripper open/close"
+    }
+]
