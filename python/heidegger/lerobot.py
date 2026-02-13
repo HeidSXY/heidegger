@@ -235,3 +235,160 @@ class SafetyWrapper:
     def __getattr__(self, name):
         """Forward attribute access to the wrapped policy."""
         return getattr(self.policy, name)
+
+
+class CBFSafetyWrapper:
+    """
+    Wraps a LeRobot policy with CBF-based safety filter.
+
+    Instead of independent per-joint clamping, uses a Control Barrier Function
+    (QP optimization) to find the globally optimal safe action. Supports
+    learned workspace boundaries for data-driven safety.
+
+    Args:
+        policy: A LeRobot policy object with `select_action(obs)` method.
+        robot_model: Name of a built-in robot or path to joints.json.
+        dt: Control loop period in seconds (default: 0.02).
+        safety_margin: Collision detection margin in meters (default: 0.015).
+        alpha: CBF decay rate (0,1], lower = more conservative (default: 0.3).
+        safety_set_json: Optional JSON string of a learned SafetySet.
+        verbose: Print safety interventions to console (default: False).
+
+    Example:
+        >>> # Basic CBF (joint + velocity + collision constraints)
+        >>> safe_policy = CBFSafetyWrapper(policy, robot_model="so_arm101")
+        >>>
+        >>> # With learned workspace boundaries
+        >>> with open("safety_set.json") as f:
+        ...     ss_json = f.read()
+        >>> safe_policy = CBFSafetyWrapper(
+        ...     policy, robot_model="so_arm101", safety_set_json=ss_json
+        ... )
+        >>> action = safe_policy.select_action(observation)
+    """
+
+    def __init__(
+        self,
+        policy,
+        robot_model: str = "so_arm101",
+        dt: float = 0.02,
+        safety_margin: float = 0.015,
+        alpha: float = 0.3,
+        safety_set_json: Optional[str] = None,
+        verbose: bool = False,
+    ):
+        from heidegger import PyCBFSafetyFilter
+
+        self.policy = policy
+        self.verbose = verbose
+
+        config_json = _load_config(robot_model)
+        self.cbf = PyCBFSafetyFilter(
+            config_json,
+            dt=dt,
+            collision_margin=safety_margin,
+            alpha=alpha,
+            robot_model=robot_model,
+            safety_set_json=safety_set_json,
+        )
+
+        # State tracking
+        self._last_action = None
+        self._intervention_count = 0
+        self._total_steps = 0
+
+    def select_action(self, observation, **kwargs):
+        """Run policy + CBF safety filter."""
+        raw_action = self.policy.select_action(observation, **kwargs)
+        action_list = SafetyWrapper._to_list(raw_action)
+
+        if self._last_action is None:
+            current = action_list
+        else:
+            current = self._last_action
+
+        result = self.cbf.filter(action_list, current)
+        safe_list = result["safe_action"]
+
+        self._last_action = safe_list
+        self._total_steps += 1
+
+        if result["was_modified"]:
+            self._intervention_count += 1
+            if self.verbose:
+                print(
+                    f"[Heidegger CBF] Step {self._total_steps}: "
+                    f"Modified (norm={result['modification_norm']:.4f}, "
+                    f"active={result['active_constraints']}, "
+                    f"iters={result['iterations']})"
+                )
+
+        return SafetyWrapper._from_list(raw_action, safe_list)
+
+    @property
+    def stats(self) -> dict:
+        """Return safety intervention statistics."""
+        return {
+            "total_steps": self._total_steps,
+            "interventions": self._intervention_count,
+            "intervention_rate": (
+                self._intervention_count / self._total_steps
+                if self._total_steps > 0
+                else 0.0
+            ),
+        }
+
+    def reset(self):
+        """Reset internal state (call between episodes)."""
+        self._last_action = None
+        self._intervention_count = 0
+        self._total_steps = 0
+
+    def __getattr__(self, name):
+        return getattr(self.policy, name)
+
+
+def calibrate_from_trajectories(
+    trajectory_file: str,
+    num_joints: int = 6,
+    sigma_multiplier: float = 3.0,
+    pca_dims: int = 3,
+    output_file: Optional[str] = None,
+) -> str:
+    """
+    Calibrate safety boundaries from saved trajectory data.
+
+    Args:
+        trajectory_file: Path to JSON file containing trajectory data.
+            Format: {"trajectories": [[j0, j1, ...], [j0, j1, ...], ...]}
+        num_joints: Number of joints.
+        sigma_multiplier: Std dev multiplier for per-joint bounds.
+        pca_dims: PCA dimensions for convex hull (0 = skip).
+        output_file: Optional output path for safety set JSON.
+
+    Returns:
+        JSON string of the learned SafetySet.
+    """
+    from heidegger import TrajectoryRecorder
+
+    with open(trajectory_file, "r") as f:
+        data = json.load(f)
+
+    trajectories = data.get("trajectories", data.get("samples", []))
+    if not trajectories:
+        raise ValueError(f"No trajectory data found in {trajectory_file}")
+
+    rec = TrajectoryRecorder(num_joints)
+    for sample in trajectories:
+        rec.record(sample)
+
+    ss = rec.calibrate(sigma_multiplier, pca_dims)
+
+    json_str = ss.to_json()
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write(json_str)
+        print(f"Safety set saved to {output_file} ({ss.num_samples} samples)")
+
+    return json_str
+

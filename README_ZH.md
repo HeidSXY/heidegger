@@ -6,6 +6,7 @@
   <p align="center">
     <a href="./README.md">English</a> ·
     <a href="#快速开始">快速开始</a> ·
+    <a href="#cbf-安全过滤器">CBF 安全过滤器</a> ·
     <a href="#lerobot-集成">LeRobot 集成</a> ·
     <a href="#交互式仿真器">交互式仿真器</a>
   </p>
@@ -27,17 +28,25 @@ VLA（视觉-语言-动作）模型正在变革机器人操作——但它们会
 
 ```
 VLA 模型输出 → [ Heidegger 安全层 ] → 安全的执行器指令
-                      │
-                ┌─────┼─────┐
-                ▼     ▼     ▼
-            位置钳制  速度限制  自碰撞检测
-                │     │     │
-                └─────┼─────┘
-                      ▼
-                 安全输出 ✅
+                       │
+              ┌────────┤────────┐
+              ▼        ▼        ▼
+          逐关节     CBF QP    学习的
+          钳制      优化器    工作空间
+              │        │        │
+              └────────┤────────┘
+                       ▼
+                  安全输出 ✅
 ```
 
-### 四层保护
+### 两种安全模式
+
+| 模式 | 方式 | 适用场景 |
+|:-----|:-----|:---------|
+| **SafetyShim**（经典） | 逐关节独立位置+速度钳制 | 简单、可预测、零配置 |
+| **CBF 安全过滤器** ✨ | 全局最优 QP，联合约束关节/速度/碰撞/工作空间 | 最大安全性，最小干预 |
+
+### 五层保护
 
 | 层级 | 功能 | 延迟 |
 |:-----|:-----|:-----|
@@ -45,8 +54,9 @@ VLA 模型输出 → [ Heidegger 安全层 ] → 安全的执行器指令
 | **L2 — 速度限制** | 限制关节转速，防止突变 | ~1 μs |
 | **L3 — 自碰撞检测** | 正运动学 + 胶囊体碰撞，拒绝危险姿态 | ~20 μs |
 | **L4 — 工作空间边界** | 防止机械臂穿透桌面/地面 | ~3 μs |
+| **L5 — 学习安全集** ✨ | 从示教轨迹学习的数据驱动工作空间边界 | ~5 μs |
 
-**全流程延迟：~26 μs** — 对你的 Python 控制循环完全透明。
+**全流程延迟：~26 μs**（经典模式）/ **~75 μs**（CBF 模式）— 对 Python 控制循环完全透明。
 
 ## 快速开始
 
@@ -72,52 +82,125 @@ maturin develop
 pip install mujoco numpy fastapi uvicorn websockets Pillow
 ```
 
-### 基本用法
+### 基本用法（经典模式）
 
 ```python
 from heidegger import SafetyShim, CollisionGuard
 
-# 加载关节配置
 with open("models/so_arm101_joints.json") as f:
     config = f.read()
 
 shim = SafetyShim(config, dt=0.02)           # 50Hz 控制频率
 guard = CollisionGuard(safety_margin=0.015)   # 15mm 安全余量
 
-# 在控制循环中使用:
 def safe_step(vla_action, current_position):
-    # L1 + L2: 位置钳制 + 速度限制
     result = shim.check(vla_action, current_position)
     safe_action = result["safe_action"]
-    
-    # L3: 自碰撞检测
     if guard.has_collision(safe_action):
-        return current_position  # 拒绝危险姿态
-    
+        return current_position
     return safe_action
+```
+
+## CBF 安全过滤器
+
+**控制屏障函数 (Control Barrier Function)** 模式用全局最优安全动作计算替代逐关节钳制。它求解二次规划（QP），找到**最接近 VLA 输出的可行动作**：
+
+```
+u* = argmin ‖u - u_vla‖²
+     s.t.   关节位置限制
+            速度限制
+            自碰撞安全距离
+            学习的工作空间边界
+```
+
+### 为什么 CBF 优于钳制？
+
+| | SafetyShim（钳制） | CBF 过滤器 |
+|---|---|---|
+| **方式** | 逐关节独立 | 全局 QP 优化 |
+| **最优性** | 贪心（可能扭曲轨迹） | 最小范数修正 |
+| **约束** | 仅位置+速度 | + 碰撞 + 学习工作空间 |
+| **数据驱动** | ❌ | ✅ 学习安全集 |
+| **形式化保证** | ❌ | ✅ CBF 不变性 |
+
+### 使用方法
+
+```python
+from heidegger import PyCBFSafetyFilter
+import json
+
+with open("models/so_arm101_joints.json") as f:
+    config = f.read()
+
+# 基本 CBF（关节 + 速度 + 碰撞约束）
+cbf = PyCBFSafetyFilter(config, dt=0.02, robot_model="so_arm101")
+result = cbf.filter(vla_action, current_position)
+safe_action = result["safe_action"]
+
+# 加入学习的工作空间边界
+with open("safety_set.json") as f:
+    ss_json = f.read()
+cbf = PyCBFSafetyFilter(config, dt=0.02, robot_model="so_arm101", safety_set_json=ss_json)
+```
+
+### 学习安全边界
+
+从人类示教中学习安全工作空间——机器人只在你示范过的安全区域内运动：
+
+```python
+from heidegger import TrajectoryRecorder
+
+# 1. 遥操作时录制
+recorder = TrajectoryRecorder(num_joints=6)
+for joint_angles in teleoperation_stream:
+    recorder.record(joint_angles)
+
+# 2. 校准（逐关节统计边界 + PCA 凸包）
+safety_set = recorder.calibrate(sigma_multiplier=3.0, pca_dims=3)
+
+# 3. 保存用于部署
+with open("safety_set.json", "w") as f:
+    f.write(safety_set.to_json())
+```
+
+CLI 工具：
+
+```bash
+python -m heidegger.calibrate -t recordings.json -o safety_set.json --sigma 3.0 --pca-dims 3 -v
 ```
 
 ## LeRobot 集成
 
 Heidegger 提供 [HuggingFace LeRobot](https://github.com/huggingface/lerobot) 策略的即插即用封装：
 
+### 经典模式
+
 ```python
 from heidegger.lerobot import SafetyWrapper
 
-# 用安全检查包裹任何 LeRobot 策略
 safe_policy = SafetyWrapper(
     policy=your_lerobot_policy,
-    robot_model="so_arm101",     # 或 "koch_v1_1", "so_arm100"
-    dt=0.02,                     # 控制频率
-    safety_margin=0.015,         # 碰撞检测余量（米）
+    robot_model="so_arm101",
 )
-
-# 用法和原始策略完全一样
 action = safe_policy.select_action(observation)
-robot.send_action(action)
 ```
 
-封装会拦截 `select_action()`，对输出 action 执行全部安全检查，返回钳制后的安全版本。你现有的 LeRobot 代码不需要任何修改。
+### CBF 模式（推荐）
+
+```python
+from heidegger.lerobot import CBFSafetyWrapper
+
+with open("safety_set.json") as f:
+    ss_json = f.read()
+
+safe_policy = CBFSafetyWrapper(
+    policy=your_lerobot_policy,
+    robot_model="so_arm101",
+    safety_set_json=ss_json,
+)
+action = safe_policy.select_action(observation)
+print(safe_policy.stats)  # {"total_steps": 100, "interventions": 3, "intervention_rate": 0.03}
+```
 
 ## 交互式仿真器
 
@@ -145,24 +228,30 @@ Apple M1 基准测试:
 | 速度限制 (6 关节) | 1.2 μs |
 | 正运动学 (7 坐标系) | 3.5 μs |
 | 自碰撞检测 (10 对碰撞体) | 20.5 μs |
-| **全流程** | **~26 μs** |
+| CBF QP 求解 (6-DOF, 25+ 约束) | ~50 μs |
+| **全流程** | **~26 μs**（经典）/ **~75 μs**（CBF） |
 
 ## 项目结构
 
 ```
 heidegger/
-├── heidegger-core/          # 纯 Rust 安全逻辑 (no_std 兼容)
+├── heidegger-core/          # 纯 Rust 安全逻辑（除 serde 零外部依赖）
 │   └── src/
 │       ├── lib.rs           # SafetyShim: 位置钳制 + 速度限制
 │       ├── kinematics.rs    # 正运动学（齐次变换矩阵）
-│       └── collision.rs     # 胶囊体自碰撞检测
+│       ├── collision.rs     # 胶囊体自碰撞检测
+│       ├── safety_set.rs    # 学习安全边界（PCA + 凸包）
+│       └── cbf.rs           # CBF 安全过滤器（投影梯度下降 QP）
 ├── heidegger-py/            # PyO3 Python 绑定
-│   └── src/lib.rs           # SafetyShim + CollisionGuard → Python
+│   └── src/lib.rs           # 5 个 Python 类
 ├── python/heidegger/        # Python 包
-│   ├── __init__.py          # 公共 API
-│   └── lerobot.py           # LeRobot 集成封装
+│   ├── __init__.py          # 公共 API（8 个导出）
+│   ├── lerobot.py           # LeRobot 封装（SafetyWrapper + CBFSafetyWrapper）
+│   └── calibrate.py         # CLI: 从轨迹数据学习安全边界
 ├── models/                  # 机器人配置
-│   └── so_arm101_joints.json
+│   ├── so_arm101_joints.json
+│   ├── koch_v1_1_joints.json
+│   └── so_arm100_joints.json
 ├── tools/                   # 交互式仿真器
 │   ├── server.py            # FastAPI + WebSocket + MuJoCo
 │   └── static/index.html    # 双视口 Web UI
@@ -171,11 +260,11 @@ heidegger/
 
 ## 支持的机器人
 
-| 机器人 | 状态 | 说明 |
-|:-------|:-----|:-----|
-| **SO-ARM101** | ✅ 完整支持 | FK、碰撞检测、全部安全层 |
-| **Koch v1.1** | 🔧 配置就绪 | 关节限位已有，FK 开发中 |
-| **SO-ARM100** | 🔧 配置就绪 | 关节限位已有，FK 开发中 |
+| 机器人 | 位置限制 | 速度限制 | FK | 碰撞 | CBF |
+|:-------|:---:|:---:|:---:|:---:|:---:|
+| **SO-ARM101** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Koch v1.1** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **SO-ARM100** | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## 为什么用 Rust？
 
@@ -194,13 +283,17 @@ heidegger/
 - [x] 速度限制 (L2)
 - [x] 自碰撞检测 (L3)
 - [x] 工作空间边界检查 (L4)
+- [x] 学习安全边界 (L5) — PCA + 凸包
+- [x] CBF 安全过滤器 — 投影梯度下降 QP
+- [x] 全机型支持（SO-ARM101, Koch v1.1, SO-ARM100）
 - [x] 交互式 Web 仿真器（双视口）
-- [x] LeRobot 集成封装
+- [x] LeRobot 集成（SafetyWrapper + CBFSafetyWrapper）
+- [x] 校准 CLI（`python -m heidegger.calibrate`）
+- [x] Shadow 模式（观察违规但不干预）
+- [ ] 基准测试报告与对比数据
+- [ ] MuJoCo 仿真：钳制 vs CBF 可视化对比
 - [ ] 动作异常检测（跳变/振荡/停滞）
 - [ ] 黑匣子事件记录器
-- [ ] 多机型 FK/碰撞支持（Koch, SO-ARM100）
-- [ ] 基准测试报告
-- [ ] 对比视频（有 vs 无安全层）
 
 ## 相关工作
 
@@ -208,7 +301,7 @@ heidegger/
 - [SafeVLA](https://arxiv.org/abs/2503.14729) — VLA 约束学习对齐（需重训模型）
 - [dora-rs](https://github.com/dora-rs/dora) — Rust 机器人数据流框架（通信层，非安全层）
 
-Heidegger 的不同之处：Rust 原生（非 Python）、覆盖完整安全栈（不仅碰撞）、即插即用（无需重训模型）。
+Heidegger 的不同之处：Rust 原生（非 Python）、覆盖完整安全栈（不仅碰撞）、CBF 优化（非逐关节钳制）、数据驱动（学习边界）、即插即用（无需重训模型）。
 
 ## 开源协议
 

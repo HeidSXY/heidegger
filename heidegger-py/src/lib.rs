@@ -4,6 +4,14 @@ use pyo3::types::{PyDict, PyList};
 use heidegger_core::{JointLimit, SafetyShim as RustSafetyShim};
 use heidegger_core::kinematics::{self, KinematicChain};
 use heidegger_core::collision::{self, CollisionChecker};
+use heidegger_core::safety_set::{
+    TrajectoryRecorder as RustRecorder,
+    SafetySet as RustSafetySet,
+};
+use heidegger_core::cbf::{
+    CBFSafetyFilter as RustCBFFilter,
+    CBFConfig,
+};
 
 /// Python-facing SafetyShim class — position/velocity clamping.
 #[pyclass]
@@ -264,10 +272,249 @@ impl CollisionGuard {
     }
 }
 
+// ─────────────────── Trajectory Recorder ───────────────────
+
+/// Python-facing TrajectoryRecorder — records joint trajectories for calibration.
+#[pyclass]
+struct TrajectoryRecorder {
+    inner: RustRecorder,
+}
+
+#[pymethods]
+impl TrajectoryRecorder {
+    /// Create a new TrajectoryRecorder.
+    ///
+    /// Args:
+    ///     num_joints: Number of joints (DOF) of the robot.
+    #[new]
+    fn new(num_joints: usize) -> Self {
+        Self {
+            inner: RustRecorder::new(num_joints),
+        }
+    }
+
+    /// Record a single snapshot of joint angles.
+    fn record(&mut self, joint_angles: Vec<f64>) {
+        self.inner.record(&joint_angles);
+    }
+
+    /// Number of recorded samples.
+    #[getter]
+    fn num_samples(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Clear all recorded data.
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Calibrate: learn safety boundaries from recorded data.
+    ///
+    /// Args:
+    ///     sigma_multiplier: Number of std devs for per-joint bounds (default: 3.0).
+    ///     pca_dims: PCA dimensions for convex hull (0 = skip hull, default: 3).
+    ///
+    /// Returns:
+    ///     A PySafetySet that can be used with CBFSafetyFilter.
+    #[pyo3(signature = (sigma_multiplier = 3.0, pca_dims = 3))]
+    fn calibrate(&self, sigma_multiplier: f64, pca_dims: usize) -> PyResult<PySafetySet> {
+        let ss = self
+            .inner
+            .calibrate(sigma_multiplier, pca_dims)
+            .map_err(|e| PyValueError::new_err(e))?;
+        Ok(PySafetySet { inner: ss })
+    }
+}
+
+// ─────────────────── Safety Set ───────────────────
+
+/// Python-facing SafetySet — learned safety boundaries.
+#[pyclass]
+struct PySafetySet {
+    inner: RustSafetySet,
+}
+
+#[pymethods]
+impl PySafetySet {
+    /// Check if a joint configuration is within the learned safety set.
+    fn contains(&self, point: Vec<f64>) -> bool {
+        self.inner.contains(&point)
+    }
+
+    /// Compute signed distance to safety boundary.
+    /// Positive = inside, negative = outside.
+    fn signed_distance(&self, point: Vec<f64>) -> f64 {
+        self.inner.signed_distance(&point)
+    }
+
+    /// Project a point to the nearest point inside the safety set.
+    /// Returns (projected_point, was_projected).
+    fn project_to_safe(&self, point: Vec<f64>) -> (Vec<f64>, bool) {
+        self.inner.project_to_safe(&point)
+    }
+
+    /// Number of joints.
+    #[getter]
+    fn num_joints(&self) -> usize {
+        self.inner.num_joints
+    }
+
+    /// Number of training samples used.
+    #[getter]
+    fn num_samples(&self) -> usize {
+        self.inner.num_samples
+    }
+
+    /// Per-joint bounds as list of dicts.
+    fn joint_bounds<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let bounds: Vec<Bound<'py, PyDict>> = self
+            .inner
+            .joint_bounds
+            .iter()
+            .map(|b| {
+                let d = PyDict::new(py);
+                d.set_item("mean", b.mean).unwrap();
+                d.set_item("std_dev", b.std_dev).unwrap();
+                d.set_item("lower", b.lower).unwrap();
+                d.set_item("upper", b.upper).unwrap();
+                d
+            })
+            .collect();
+        Ok(PyList::new(py, bounds).unwrap())
+    }
+
+    /// Serialize to JSON.
+    fn to_json(&self) -> PyResult<String> {
+        self.inner.to_json().map_err(|e| PyValueError::new_err(e))
+    }
+
+    /// Load from JSON.
+    #[staticmethod]
+    fn from_json(json: &str) -> PyResult<Self> {
+        let inner = RustSafetySet::from_json(json)
+            .map_err(|e| PyValueError::new_err(e))?;
+        Ok(PySafetySet { inner })
+    }
+}
+
+// ─────────────────── CBF Safety Filter ───────────────────
+
+/// Python-facing CBFSafetyFilter — globally optimal safe action via QP.
+///
+/// Replaces independent per-joint clamping with a simultaneous constraint
+/// optimization that finds the closest safe action to the VLA policy output.
+#[pyclass]
+struct PyCBFSafetyFilter {
+    inner: RustCBFFilter,
+}
+
+#[pymethods]
+impl PyCBFSafetyFilter {
+    /// Create a CBF safety filter.
+    ///
+    /// Args:
+    ///     config_json: JSON joint limits (same format as SafetyShim).
+    ///     dt: Control loop period (seconds).
+    ///     collision_margin: Self-collision safety margin (meters, default: 0.015).
+    ///     alpha: CBF decay rate (0,1], lower = more conservative (default: 0.3).
+    ///     robot_model: Optional robot model for collision constraints.
+    ///     safety_set_json: Optional JSON of a learned SafetySet.
+    #[new]
+    #[pyo3(signature = (
+        config_json,
+        dt = 0.02,
+        collision_margin = 0.015,
+        alpha = 0.3,
+        robot_model = None,
+        safety_set_json = None
+    ))]
+    fn new(
+        config_json: &str,
+        dt: f64,
+        collision_margin: f64,
+        alpha: f64,
+        robot_model: Option<&str>,
+        safety_set_json: Option<&str>,
+    ) -> PyResult<Self> {
+        let config = CBFConfig {
+            dt,
+            collision_margin,
+            alpha,
+            ..CBFConfig::default()
+        };
+
+        let mut filter = RustCBFFilter::from_json(config_json, config)
+            .map_err(|e| PyValueError::new_err(e))?;
+
+        // Enable collision constraint if robot model specified
+        if let Some(model) = robot_model {
+            filter = filter
+                .with_collision(model)
+                .map_err(|e| PyValueError::new_err(e))?;
+        }
+
+        // Enable learned workspace constraint if safety set provided
+        if let Some(ss_json) = safety_set_json {
+            let ss = RustSafetySet::from_json(ss_json)
+                .map_err(|e| PyValueError::new_err(e))?;
+            filter = filter.with_safety_set(ss);
+        }
+
+        Ok(PyCBFSafetyFilter { inner: filter })
+    }
+
+    /// Run the CBF safety filter.
+    ///
+    /// Args:
+    ///     u_vla: Desired action from VLA policy.
+    ///     x_current: Current joint positions.
+    ///
+    /// Returns:
+    ///     Dict with: safe_action, was_modified, modification_norm,
+    ///     active_constraints, constraint_values, iterations.
+    fn filter<'py>(
+        &self,
+        py: Python<'py>,
+        u_vla: Vec<f64>,
+        x_current: Vec<f64>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let result = self
+            .inner
+            .filter(&u_vla, &x_current)
+            .map_err(|e| PyValueError::new_err(e))?;
+
+        let dict = PyDict::new(py);
+        dict.set_item("safe_action", &result.safe_action)?;
+        dict.set_item("was_modified", result.was_modified)?;
+        dict.set_item("modification_norm", result.modification_norm)?;
+        dict.set_item("active_constraints", result.active_constraints)?;
+        dict.set_item("iterations", result.iterations)?;
+
+        let constraints: Vec<Bound<'py, PyDict>> = result
+            .constraint_values
+            .iter()
+            .map(|cv| {
+                let d = PyDict::new(py);
+                d.set_item("name", &cv.name).unwrap();
+                d.set_item("value", cv.value).unwrap();
+                d.set_item("active", cv.active).unwrap();
+                d
+            })
+            .collect();
+        dict.set_item("constraint_values", constraints)?;
+
+        Ok(dict)
+    }
+}
+
 /// The Python module.
 #[pymodule]
 fn heidegger(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SafetyShim>()?;
     m.add_class::<CollisionGuard>()?;
+    m.add_class::<TrajectoryRecorder>()?;
+    m.add_class::<PySafetySet>()?;
+    m.add_class::<PyCBFSafetyFilter>()?;
     Ok(())
 }
