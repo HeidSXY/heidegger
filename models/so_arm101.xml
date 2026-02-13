@@ -1,0 +1,154 @@
+<!--
+  SO-ARM101 MuJoCo Model
+  Based on TheRobotStudio/Hiwonder SO-ARM101 specifications:
+  - 6-DOF: base rotation, shoulder, elbow, wrist_flex, wrist_roll, gripper
+  - STS3215 bus servos (4096 steps/rev, 30kg.cm @ 12V)
+  - 3D-printed PLA structure
+  
+  Link lengths are approximate, based on community measurements and CAD files.
+  Joint limits are conservative estimates from calibration data.
+-->
+<mujoco model="so_arm101">
+  <compiler angle="radian" autolimits="true"/>
+  
+  <visual>
+    <global offwidth="1280" offheight="720"/>
+  </visual>
+  
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+  
+  <default>
+    <joint damping="0.5" armature="0.1"/>
+    <geom type="capsule" rgba="0.3 0.3 0.3 1" friction="1 0.005 0.001"/>
+    <position kp="50" kv="5"/>
+  </default>
+
+  <asset>
+    <texture type="2d" name="grid" builtin="checker" rgb1="0.9 0.9 0.9" rgb2="0.7 0.7 0.7" 
+             width="512" height="512"/>
+    <material name="grid_mat" texture="grid" texrepeat="8 8" reflectance="0.1"/>
+    <material name="arm_dark" rgba="0.15 0.15 0.15 1"/>
+    <material name="arm_blue" rgba="0.2 0.4 0.8 1"/>
+    <material name="arm_orange" rgba="0.9 0.5 0.1 1"/>
+    <material name="gripper_mat" rgba="0.4 0.4 0.4 1"/>
+    <material name="target_mat" rgba="0.9 0.2 0.2 0.5"/>
+  </asset>
+  
+  <worldbody>
+    <!-- Ground plane -->
+    <geom name="floor" type="plane" size="0.5 0.5 0.01" material="grid_mat"/>
+    
+    <!-- Table surface -->
+    <body name="table" pos="0 0 0.0">
+      <geom name="table_top" type="box" size="0.3 0.3 0.005" pos="0 0 0" 
+            rgba="0.6 0.45 0.3 1" mass="10"/>
+    </body>
+    
+    <!-- Target object (a cup to reach for) -->
+    <body name="target_cup" pos="0.20 0.10 0.04">
+      <geom name="cup_body" type="cylinder" size="0.025 0.04" rgba="0.9 0.2 0.2 0.8" mass="0.1"/>
+      <joint name="cup_free" type="free"/>
+    </body>
+    
+    <!-- SO-ARM101 Robot -->
+    <body name="base_mount" pos="0 0 0.005">
+      <!-- Base plate -->
+      <geom name="base_plate" type="cylinder" size="0.04 0.015" material="arm_dark" mass="0.2"/>
+      
+      <!-- Joint 1: Base rotation (yaw) -->
+      <body name="base_link" pos="0 0 0.015">
+        <joint name="base_rotation" type="hinge" axis="0 0 1" 
+               range="-3.14 3.14" ref="0"/>
+        <geom name="base_body" type="cylinder" size="0.03 0.02" material="arm_blue" mass="0.15"/>
+        
+        <!-- Joint 2: Shoulder (pitch) -->
+        <body name="shoulder_link" pos="0 0 0.02">
+          <joint name="shoulder" type="hinge" axis="0 1 0"
+                 range="-1.57 1.57" ref="0"/>
+          <geom name="shoulder_body" type="capsule" fromto="0 0 0 0 0 0.095" size="0.018"
+                material="arm_dark" mass="0.12"/>
+          
+          <!-- Joint 3: Elbow (pitch) -->
+          <body name="elbow_link" pos="0 0 0.095">
+            <joint name="elbow" type="hinge" axis="0 1 0"
+                   range="-2.36 0.0" ref="0"/>
+            <geom name="elbow_body" type="capsule" fromto="0 0 0 0 0 0.095" size="0.015"
+                  material="arm_blue" mass="0.10"/>
+            
+            <!-- Joint 4: Wrist flex (pitch) -->
+            <body name="wrist_flex_link" pos="0 0 0.095">
+              <joint name="wrist_flex" type="hinge" axis="0 1 0"
+                     range="-1.57 1.57" ref="0"/>
+              <geom name="wrist_flex_body" type="capsule" fromto="0 0 0 0 0 0.05" size="0.012"
+                    material="arm_dark" mass="0.06"/>
+              
+              <!-- Joint 5: Wrist roll (rotation around forearm axis) -->
+              <body name="wrist_roll_link" pos="0 0 0.05">
+                <joint name="wrist_roll" type="hinge" axis="0 0 1"
+                       range="-3.14 3.14" ref="0"/>
+                <geom name="wrist_roll_body" type="cylinder" size="0.015 0.008" 
+                      material="arm_orange" mass="0.04"/>
+                
+                <!-- Joint 6: Gripper -->
+                <body name="gripper_base" pos="0 0 0.008">
+                  <joint name="gripper" type="hinge" axis="0 1 0"
+                         range="0.0 1.05" ref="0"/>
+                  <!-- Left finger -->
+                  <geom name="finger_left" type="box" size="0.004 0.003 0.025" 
+                        pos="0.008 0 0.025" material="gripper_mat" mass="0.02"/>
+                  <!-- Right finger -->
+                  <geom name="finger_right" type="box" size="0.004 0.003 0.025" 
+                        pos="-0.008 0 0.025" material="gripper_mat" mass="0.02"/>
+                  <!-- Fingertip site for measuring end-effector position -->
+                  <site name="end_effector" pos="0 0 0.05" size="0.005" rgba="1 0 0 1"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    
+    <!-- Camera -->
+    <camera name="overview" pos="0.5 -0.3 0.5" xyaxes="0.5 0.87 0 -0.3 0.2 0.93"/>
+    <camera name="front" pos="0.4 0 0.3" xyaxes="0 1 0 -0.6 0 0.8"/>
+    <camera name="top" pos="0 0 0.8" xyaxes="1 0 0 0 1 0"/>
+    
+    <!-- Lighting -->
+    <light pos="0.3 0.3 0.8" dir="-0.3 -0.3 -0.8" diffuse="0.8 0.8 0.8"/>
+    <light pos="-0.3 -0.3 0.8" dir="0.3 0.3 -0.8" diffuse="0.4 0.4 0.4"/>
+  </worldbody>
+  
+  <actuator>
+    <!-- STS3215 servo actuators: position-controlled -->
+    <!-- ctrlrange matches joint range, forcerange based on 30kg.cm ≈ 2.94 Nm -->
+    <position name="act_base_rotation" joint="base_rotation" ctrlrange="-3.14 3.14"
+              kp="50" forcerange="-3.0 3.0"/>
+    <position name="act_shoulder" joint="shoulder" ctrlrange="-1.57 1.57"
+              kp="80" forcerange="-3.0 3.0"/>
+    <position name="act_elbow" joint="elbow" ctrlrange="-2.36 0.0"
+              kp="60" forcerange="-3.0 3.0"/>
+    <position name="act_wrist_flex" joint="wrist_flex" ctrlrange="-1.57 1.57"
+              kp="40" forcerange="-2.0 2.0"/>
+    <position name="act_wrist_roll" joint="wrist_roll" ctrlrange="-3.14 3.14"
+              kp="30" forcerange="-2.0 2.0"/>
+    <position name="act_gripper" joint="gripper" ctrlrange="0.0 1.05"
+              kp="20" forcerange="-1.0 1.0"/>
+  </actuator>
+  
+  <sensor>
+    <jointpos name="pos_base_rotation" joint="base_rotation"/>
+    <jointpos name="pos_shoulder" joint="shoulder"/>
+    <jointpos name="pos_elbow" joint="elbow"/>
+    <jointpos name="pos_wrist_flex" joint="wrist_flex"/>
+    <jointpos name="pos_wrist_roll" joint="wrist_roll"/>
+    <jointpos name="pos_gripper" joint="gripper"/>
+    <jointvel name="vel_base_rotation" joint="base_rotation"/>
+    <jointvel name="vel_shoulder" joint="shoulder"/>
+    <jointvel name="vel_elbow" joint="elbow"/>
+    <jointvel name="vel_wrist_flex" joint="wrist_flex"/>
+    <jointvel name="vel_wrist_roll" joint="wrist_roll"/>
+    <jointvel name="vel_gripper" joint="gripper"/>
+    <framepos name="ee_pos" objtype="site" objname="end_effector"/>
+  </sensor>
+</mujoco>

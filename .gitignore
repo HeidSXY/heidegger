@@ -1,0 +1,46 @@
+# Build artifacts
+/target/
+*.so
+*.dylib
+*.pyd
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+.venv310/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# Internal docs (whitepapers, BP, research notes)
+docs/
+
+# Generated results (videos, data)
+results/*.mp4
+results/*.npz
+
+# Cargo.lock (library crate)
+Cargo.lock
+
+# Gemini artifacts
+.gemini/

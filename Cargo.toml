@@ -1,0 +1,3 @@
+[workspace]
+members = ["heidegger-core", "heidegger-py"]
+resolver = "2"

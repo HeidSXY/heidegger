@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "heidegger-safe"
+version = "0.1.0"
+description = "A deterministic safety layer for VLA-driven robots"
+requires-python = ">=3.9"
+license = "MIT"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "heidegger.heidegger"
+manifest-path = "heidegger-py/Cargo.toml"

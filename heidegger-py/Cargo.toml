@@ -1,0 +1,13 @@
+[package]
+name = "heidegger-py"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for Heidegger safety layer"
+
+[lib]
+name = "heidegger"
+crate-type = ["cdylib"]
+
+[dependencies]
+heidegger-core = { path = "../heidegger-core" }
+pyo3 = { version = "0.28", features = ["extension-module"] }
